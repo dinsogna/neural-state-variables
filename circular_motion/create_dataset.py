@@ -18,7 +18,7 @@ class CircularMotion():
                      int(self.canvas_height / 2 - self.canvas_radius * math.sin(self.angle)))
 
    def next_frame(self):
-      image = Image.new('RGBA', (self.canvas_width, self.canvas_height))
+      image = Image.new('RGB', (self.canvas_width, self.canvas_height))
       draw = ImageDraw.Draw(image)
       draw.rectangle((0, 0, 128, 128), fill=self.canvas_color)
       draw.ellipse((self.center[0] - self.point_radius,
