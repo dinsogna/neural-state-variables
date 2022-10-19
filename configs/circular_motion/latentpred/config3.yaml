@@ -8,9 +8,8 @@ val_batch: 256
 test_batch: 256
 num_workers: 8
 model_name: 'latent-prediction'
-# data_filepath: './data/'
-data_filepath: '/home/dmi/neural-state-variables/data'
+data_filepath: './data/'
 dataset: 'circular_motion'
 lr_schedule: [20, 50, 100, 300]
 num_gpus: 1
-epochs: 1
+epochs: 1000
