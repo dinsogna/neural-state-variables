@@ -72,6 +72,10 @@ class VisLatentDynamicsModel(pl.LightningModule):
 
     def __build_model(self):
         # model
+        if self.hparams.model_name == 'latent-prediction' and self.hparams.dataset == 'circular_motion':
+            self.model = LatentPredModel(in_channels=2)
+            self.high_dim_model = EncoderDecoder64x1x1(in_channels=3)
+            self.refine_model = RefineCircularMotionModel(in_channels=64)
         if self.hparams.model_name == 'latent-prediction' and self.hparams.dataset == 'single_pendulum':
             self.model = LatentPredModel(in_channels=2)
             self.high_dim_model = EncoderDecoder64x1x1(in_channels=3)
