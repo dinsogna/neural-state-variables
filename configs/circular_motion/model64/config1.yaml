@@ -8,8 +8,8 @@ val_batch: 256
 test_batch: 256
 num_workers: 8
 model_name: 'encoder-decoder-64'
-data_filepath: './data/'
+data_filepath: '/home/kevin/neural-state-variables-working/circular_motion'
 dataset: 'circular_motion'
 lr_schedule: [20, 50, 100, 300]
 num_gpus: 1
-epochs: 1000
+epochs: 5
