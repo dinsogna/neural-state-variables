@@ -2,6 +2,7 @@ import os
 import math
 import random
 from PIL import Image, ImageDraw
+import numpy as np
 
 class CircularMotion():
    
@@ -28,7 +29,7 @@ class CircularMotion():
       self.angle = self.angle + self.point_omega / 60
       self.center = (int(self.canvas_width / 2 + self.canvas_radius * math.cos(self.angle)),
                      int(self.canvas_height / 2 - self.canvas_radius * math.sin(self.angle)))
-      return image
+      return image, self.angle
 
 def main():
 
@@ -52,15 +53,21 @@ def main():
    if not os.path.exists('circular_motion'):
       os.mkdir('circular_motion')
    
+   all_angles = np.zeros((num_videos,60), dtype=float)
+
    for video in range(num_videos):
       if not os.path.exists(f'circular_motion/{video}'):
          os.mkdir(f'circular_motion/{video}')
       point_radius = random.randint(point_radius_min, point_radius_max)
       point_omega = random.random() * (point_omega_max - point_omega_min) + point_omega_min
       cm = CircularMotion(128, 128, 40, point_radius, point_omega)
+      
       for dt in range(60):
-         frame = cm.next_frame()
+         frame, all_angles[video,dt] = cm.next_frame()
          frame.save(f'circular_motion/{video}/{dt}.png')
+   
+   print(all_angles)
+   np.save('all_angles', all_angles)
 
 if __name__ == '__main__':
    main()
