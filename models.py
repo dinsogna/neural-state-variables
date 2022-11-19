@@ -4,6 +4,7 @@ import torch
 import shutil
 import numpy as np
 from torch import nn
+import torch
 import pytorch_lightning as pl
 import torch.nn.functional as F
 from torchvision import transforms
@@ -86,8 +87,18 @@ class VisDynamicsModel(pl.LightningModule):
             self.model = RefineReactionDiffusionModel(in_channels=64)
         if 'refine' in self.hparams.model_name and self.hparams.if_test:
             self.high_dim_model = EncoderDecoder64x1x1(in_channels=3)
-        # loss
-        self.loss_func = nn.MSELoss()
+
+    def loss_func(self, output, latent, target, smooth=True, l=0.05): 
+        mse_loss = nn.MSELoss()
+        loss = mse_loss(output, target) #reconstruction loss
+        #print("reconstruction loss: ", loss)
+        if 'refine' in self.hparams.model_name and smooth==True :
+            #FIXME should this be target or output?
+            next_output, next_latent = self.train_forward(output) #getting next latent variables
+            latent_loss = mse_loss(latent, next_latent)
+            #print("latent loss: ", latent_loss)
+            loss = (1-l) * latent_loss + l * loss
+        return loss
 
     def train_forward(self, x):
         if self.hparams.model_name == 'encoder-decoder' or 'refine' in self.hparams.model_name:
@@ -99,8 +110,7 @@ class VisDynamicsModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         data, target, filepath = batch
         output, latent = self.train_forward(data)
-
-        train_loss = self.loss_func(output, target)
+        train_loss = self.loss_func(output, latent, target)
         self.log('train_loss', train_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return train_loss
 
@@ -108,7 +118,7 @@ class VisDynamicsModel(pl.LightningModule):
         data, target, filepath = batch
         output, latent = self.train_forward(data)
 
-        val_loss = self.loss_func(output, target)
+        val_loss = self.loss_func(output, latent, target)
         self.log('val_loss', val_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return val_loss
 
@@ -120,7 +130,7 @@ class VisDynamicsModel(pl.LightningModule):
                 output, latent = self.model(data)
             if self.hparams.model_name == 'encoder-decoder-64':
                 output, latent = self.model(data, data, False)
-            test_loss = self.loss_func(output, target)
+            test_loss = self.loss_func(output, latent, target)
             self.log('test_loss', test_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
             # save the output images and latent vectors
             self.all_filepaths.extend(filepath)
@@ -143,8 +153,9 @@ class VisDynamicsModel(pl.LightningModule):
             latent_reconstructed, latent_latent = self.model(latent)
             output, _ = self.high_dim_model(data, latent_reconstructed.unsqueeze(2).unsqueeze(3), True)
             # calculate losses
-            pixel_reconstruction_loss = self.loss_func(output, target)
-            test_loss = self.loss_func(latent_reconstructed, latent)
+            pixel_reconstruction_loss = self.loss_func(output, latent, target, smooth=False)
+            dummy = 0
+            test_loss = self.loss_func(latent_reconstructed, dummy, latent, smooth=False)
             self.log('test_loss', test_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
             self.log('pixel_reconstruction_loss', pixel_reconstruction_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
             # save the output images and latent vectors
