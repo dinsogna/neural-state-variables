@@ -3,29 +3,33 @@
 import cv2
 import argparse
 import os
+import sys
 
 #parameters
 framerate = 10.0
 
 # Construct the argument parser and parse the arguments
 ap = argparse.ArgumentParser()
+ap.add_argument("path")
 ap.add_argument("-ext", "--extension", required=False, default='png', help="extension name. default is 'png'.")
 ap.add_argument("-o", "--output", required=False, default='output.mp4', help="output video file")
 args = vars(ap.parse_args())
 
 # Arguments
-dir_path = "data/circular_motion/0"
+dir_path = args['path']
 ext = args['extension']
 output = args['output']
 
 images = []
+video_idx = "_"
 for f in os.listdir(dir_path):
-    if f.endswith(ext):
+    if f.endswith(ext) and (video_idx == "_" or f.startswith(video_idx)):
         images.append(f)
+        video_idx = f[:f.index('_') + 1]
 
 # print(images)
 
-#Sort the files found in the directory
+# Sort the files found in the directory
 # int_name = images[0].split(".")[0]
 images = sorted(images, key=lambda x: int(os.path.splitext(x)[0]))
 # print(images)
