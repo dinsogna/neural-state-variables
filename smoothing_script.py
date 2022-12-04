@@ -4,6 +4,7 @@ from subprocess import Popen
 import shlex
 import multiprocessing
 import signal, psutil
+import re
 
 def run(seed1, seed2, num_train_latent, num_train_state, gpus):
 
@@ -17,14 +18,17 @@ def run(seed1, seed2, num_train_latent, num_train_state, gpus):
         os.makedirs(directory1, exist_ok = True)
 
         #run latent training script
-        #os.system('cd ' + directory1 +  '; ../scripts/train_latent.sh circular_motion 3')
-        command = '../scripts/train_latent.sh circular_motion 3'
+        #os.system('cd ' + directory1 +  '; ../scripts/train_latent.sh circular_motion 4')
+        command = '../scripts/train_latent_f.sh circular_motion 4'
         #command = '../scripts/dum.sh'
         latent_p[i] = Popen(shlex.split(command), cwd=directory1)
         print(i)
 
     state_p = [0]*num_train_state*num_train_latent
     latent_done = list()
+    i = 0
+    while (check_running(latent_p, num_train_latent)):
+        i = 1
     while (check_running(latent_p, num_train_latent)):
         
         for i in range(num_train_latent):
@@ -45,12 +49,25 @@ def run(seed1, seed2, num_train_latent, num_train_state, gpus):
     print (check_running(latent_p, num_train_latent))
 
 def check_running(p, i):
-    for i in range(i):
+    cmd = "screen -ls | awk '/\.END-TO-END-TRAIN\\t/ {print strtonum($1)}'"
+    print(cmd)
+    ps = subprocess.Popen(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+    output = ps.communicate()[0]
+    print(output)
+    all_run = re.findall(r'\d+', str(output))
+    print(all_run)
+    if len(all_run) == 0:
+        return False
+    else:
+        return True
+    #pid = int(all_run[0])
+
+    #for i in range(i):
         #if p[i].poll() == None or p[i].poll() == 0:
-        if p[i].poll() == None:
-            return True
-    print("pid:", p[i].pid)
-    print("child-process:", child_processes(p[i].pid))
+        #if p[i].poll() == None:
+         #   return True
+    #print("pid:", p[i].pid)
+    #print("child-process:", child_processes(p[i].pid))
     return False
 
 
@@ -65,4 +82,4 @@ def child_processes(parent_pid, sig=signal.SIGTERM):
     #for process in children:
      # process.send_signal(sig)
 
-run("run", "runa", 1, 2, 4)
+run("testing_c", "runa", 1, 2, 4)
