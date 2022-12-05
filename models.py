@@ -88,17 +88,24 @@ class VisDynamicsModel(pl.LightningModule):
         if 'refine' in self.hparams.model_name and self.hparams.if_test:
             self.high_dim_model = EncoderDecoder64x1x1(in_channels=3)
 
-    def loss_func(self, output, target, latent=None, lamda=0.05): 
-        mse_loss = nn.MSELoss()
-        loss = mse_loss(output, target) #reconstruction loss
-        #print("reconstruction loss: ", loss)
+    def loss_func(self, output, target, latent=None, lamda=0.01): 
+        loss = self.recon_loss_func(output, target)
         if 'refine' in self.hparams.model_name and not latent == None:
-            #FIXME should this be target or output?
-            next_output, next_latent = self.train_forward(output) #getting next latent variables
-            latent_loss = mse_loss(latent, next_latent)
-            #print("latent loss: ", latent_loss)
-            loss = (1-lamda) * latent_loss + lamda * loss
+            reg_loss = self.reg_loss_func(output, target, latent)
+            loss = (1-lamda) * reg_loss + lamda * loss
         return loss
+
+    def recon_loss_func(self, output, target):
+        mse_loss = nn.MSELoss()
+        loss = 64 * mse_loss(output, target) # dimension of output is 64
+        return loss
+    
+    def reg_loss_func(self, output, target, latent):
+        mse_loss = nn.MSELoss()
+        # FIXME should this be target or output?
+        next_output, next_latent = self.train_forward(output)
+        latent_loss = 2 * mse_loss(latent, next_latent) # dimension of latent is 2
+        return latent_loss
 
     def train_forward(self, x):
         if self.hparams.model_name == 'encoder-decoder' or 'refine' in self.hparams.model_name:
@@ -112,6 +119,10 @@ class VisDynamicsModel(pl.LightningModule):
         output, latent = self.train_forward(data)
         train_loss = self.loss_func(output, target, latent=latent)
         self.log('train_loss', train_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        train_recon_loss = self.recon_loss_func(output, target)
+        self.log('train_reconstruction_loss', train_recon_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        train_reg_loss = self.reg_loss_func(output, target, latent)
+        self.log('train_regularization_loss', train_reg_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return train_loss
 
     def validation_step(self, batch, batch_idx):
