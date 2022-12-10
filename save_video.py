@@ -11,10 +11,15 @@ framerate = 10.0
 ap = argparse.ArgumentParser()
 ap.add_argument("-ext", "--extension", required=False, default='png', help="extension name. default is 'png'.")
 ap.add_argument("-o", "--output", required=False, default='output.mp4', help="output video file")
+ap.add_argument("-p", "--path", required=False, default='/home/dmi/neural-state-variables/scripts/logs_circular_motion_refine-64_1/prediction_long_term/model_rollout/5', help="path containing images")
 args = vars(ap.parse_args())
 
 # Arguments
-dir_path = "data/circular_motion/0"
+# dir_path = "scripts/logs_circular_motion_encoder-decoder-64_1/prediction_long_term/model_rollout/4"
+# dir_path = "circular_motion/circular_motion/4"
+# dir_path = "scripts/logs_circular_motion_refine-64_1/prediction_long_term/model_rollout/4"
+# dir_path = "scripts/logs_circular_motion_encoder-decoder_1/prediction_long_term/model_rollout/4"
+dir_path = args['path']
 ext = args['extension']
 output = args['output']
 
