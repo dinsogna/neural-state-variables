@@ -59,6 +59,7 @@ def run(seed1, seed2, script1, script2, dataset, num_train_latent, num_train_sta
 
                 #run the other ones
                 for j in range(num_train_state):
+                    directory1 = "./" + seed1 + "-" + str(i)
                     directory2 = seed2 + "-" + str(j)
                     os.makedirs(directory1+"/" + directory2, exist_ok = True )
                     directory =  directory1 + '/' + directory2
@@ -66,9 +67,9 @@ def run(seed1, seed2, script1, script2, dataset, num_train_latent, num_train_sta
                     gpu_num = wait_until_free(gpu_name)
                     print(gpu_name, gpu_num)
                     #command = "../../scripts/dum2.sh circular_motion " + str(gpus[0]) +  " TRAIN_DUM2-" + str(i)
-                    command = '../../scripts/' + script2 + ' ' + dataset + ' ' + str(gpus[gpu_num]) + ' TRAIN_DUM2-' + str(i) +"h"+ str(j)
+                    command = '../scripts/' + script2 + ' ' + dataset + ' ' + str(gpus[gpu_num]) + ' TRAIN_DUM2-' + str(i) +"h"+ str(j) + " " + directory2
                     print("latent: ", i, ", ", j)
-                    state_p[i * num_train_latent + j] =  Popen(shlex.split(command), cwd=directory)
+                    state_p[i * num_train_latent + j] =  Popen(shlex.split(command), cwd=directory1)
                     gpu_name[gpu_num] = 'TRAIN_DUM2-' + str(i) +"h"+ str(j)
 
 def wait_until_free(gpu_name): # return index when free
@@ -109,4 +110,5 @@ def child_processes(parent_pid, sig=signal.SIGTERM):
 
 #testing scripts
 #run("testing_c", "runa", "dum.sh", "dum2.sh", "circular_motion", 1, 1, [4]) #simple script test w/o gpu blocking
-run("testing_c", "runa", "dum.sh", "dum2.sh", "circular_motion", 3, 2, [4, 5]) #simple script test w gpu blocking
+#run("testing_c", "runa", "dum.sh", "dum2.sh", "circular_motion", 3, 2, [4, 5]) #simple script test w gpu blocking
+run("actual_test_t", "run", "train_latent_f.sh", "refine_64_train_2.sh", "circular_motion", 1, 1, [2, 4, 6])
