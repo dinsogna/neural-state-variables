@@ -48,7 +48,8 @@ class VisDynamicsModel(pl.LightningModule):
                  model_name: str='encoder-decoder-64',
                  data_filepath: str='data',
                  dataset: str='single_pendulum',
-                 lr_schedule: list=[20, 50, 100]) -> None:
+                 lr_schedule: list=[20, 50, 100],
+                 lambda_schedule: list=[0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,]) -> None:
         super().__init__()
         self.save_hyperparameters()
         self.kwargs = {'num_workers': self.hparams.num_workers, 'pin_memory': True} if self.hparams.if_cuda else {}
@@ -60,6 +61,13 @@ class VisDynamicsModel(pl.LightningModule):
             mkdir(self.var_log_dir)
 
         self.__build_model()
+        
+        #DOM: store training losses / valuable data here
+        # self.train_loss_logs = {"loss":[], "recon": [], "reg":[]}
+        # self.loss_log_dir = os.path.join("./loss_logs", "_", self.hparams.seed)
+        # self.train_loss_log = []
+        # self.val_loss_logs = dict()
+        # self.test_loss_logs = dict()
 
     def __build_model(self):
         # model
@@ -88,15 +96,21 @@ class VisDynamicsModel(pl.LightningModule):
         if 'refine' in self.hparams.model_name and self.hparams.if_test:
             self.high_dim_model = EncoderDecoder64x1x1(in_channels=3)
 
+    # Loss = (1-lambda)*recon_loss + lambda*smoothing_loss
     def loss_func(self, output, target, latent=None, lamda=0.01): 
         loss = self.recon_loss_func(output, target)
+        # ONLY Use combined loss for the refine script 
         if 'refine' in self.hparams.model_name and not latent == None:
+            lda = self.hparams.lambda_schedule[self.trainer.current_epoch] 
             reg_loss = self.reg_loss_func(output, target, latent)
-            loss = (1-lamda) * reg_loss + lamda * loss
+            loss = (1-lda) * reg_loss + lda * loss
         return loss
 
     def recon_loss_func(self, output, target):
         mse_loss = nn.MSELoss()
+
+        # This is how pytorch MSE loss works
+        # Divides by an additional factor for our dimension; 
         loss = 64 * mse_loss(output, target) # dimension of output is 64
         return loss
     
@@ -117,12 +131,26 @@ class VisDynamicsModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         data, target, filepath = batch
         output, latent = self.train_forward(data)
+        
+        # Recon + Smoothing loss
         train_loss = self.loss_func(output, target, latent=latent)
         self.log('train_loss', train_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        
+        # Recon Loss
         train_recon_loss = self.recon_loss_func(output, target)
         self.log('train_reconstruction_loss', train_recon_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        
+        # Smoothing (Regularization) Loss
         train_reg_loss = self.reg_loss_func(output, target, latent)
         self.log('train_regularization_loss', train_reg_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        # self.log('current_epoch123', self.trainer.current_epoch, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        # print("current-epoch345:", self.trainer.current_epoch)
+
+        # self.train_loss_logs["loss"].append(loss)
+        # self.train_loss_logs["recon"].append(train_recon_loss)
+        # self.train_loss_logs["reg"].append(train_reg_loss)
+        # self.train_loss_logs["epoch"].append(self.current_epoch)
+
         return train_loss
 
     def validation_step(self, batch, batch_idx):

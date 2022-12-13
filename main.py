@@ -52,7 +52,8 @@ def main():
                              model_name=cfg.model_name,
                              data_filepath=cfg.data_filepath,
                              dataset=cfg.dataset,
-                             lr_schedule=cfg.lr_schedule)
+                             lr_schedule=cfg.lr_schedule,
+                             lambda_schedule=cfg.lambda_schedule)
 
     # define callback for selecting checkpoints during training
     checkpoint_callback = ModelCheckpoint(
@@ -73,6 +74,9 @@ def main():
                       checkpoint_callback=checkpoint_callback)
 
     trainer.fit(model)
+    #Save the training loss
+    # save_dir = os.path.join("./loss_logs", log_dir)
+    # np.save(save_dir, model.train_loss_logs)
 
 def main_latentpred():
     config_filepath = str(sys.argv[2])

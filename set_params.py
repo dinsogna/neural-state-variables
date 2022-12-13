@@ -1,6 +1,16 @@
 import os
 import yaml
 
+# define a custom representer for yaml strings
+# Define a quoted class, which uses style = '"' and add representer to yaml
+class quoted(str):
+    pass
+
+def quoted_presenter(dumper, data):
+    return dumper.represent_scalar('tag:yaml.org,2002:str', data, style="'")
+
+yaml.add_representer(quoted, quoted_presenter)
+
 datasets = {
         # 0: "test",
         1: "circular_motion",
@@ -25,7 +35,8 @@ params = {
         7: "test_batch",
         8: "num_workers",
         9: "data_filepath",
-        10: "num_gpus"
+        10: "num_gpus",
+        11: "lambda_schedule"
 }
 
 print("=====================")
@@ -61,7 +72,7 @@ print()
 while True:
     try:
         choice = int(input("Select a hyperparameter to edit (select 0 to exit): "))
-        if choice < 0 or choice > 10:
+        if choice < 0 or choice > 11:
             print("Not a valid selection. Please try again.")
         else:
             break
@@ -77,10 +88,31 @@ param_name = params[choice]
 while True:
     try:
         new_param_value = input(f"Select a new value for {param_name}: ")
+        print("new param value:", new_param_value)
+        print("new param type:", type(new_param_value))
+        print("split:", new_param_value[1:-1].split(","))
         if param_name in ['data_filepath']:
             break
-        elif param_name in ['lr', 'if_cuda', 'gamma', 'train_batch', 'val_batch', 'test_batch', 'num_workers', 'num_gpus', 'epochs']:
+        if param_name in ['if_cuda']:
+            if new_param_value in ['True', 'true', 'T', 't']:
+                new_param_value = True
+            else:
+                new_param_value = False
+            break
+        elif param_name in ['train_batch', 'val_batch', 'test_batch', 'num_workers', 'num_gpus', 'epochs']:
             new_param_value = int(new_param_value)
+            break
+        elif param_name in ['lr', 'gamma']:
+            new_param_value = float(new_param_value)
+            break
+        elif param_name in ['lambda_schedule']:
+            out = []
+            new_param_value = new_param_value[1:-1].split(",")
+            for val in new_param_value:
+                out.append(float(val))
+            new_param_value = out
+            print("new param value after processing:", new_param_value)
+            print("type:", type(new_param_value))
             break
     except ValueError:
         print("Invalid value try again. ")
@@ -95,9 +127,11 @@ for dir in os.listdir(path):
         with open(path_yaml) as yf:
             yaml_dict = yaml.load(yf, Loader=yaml.FullLoader)
         yaml_dict[param_name] = new_param_value
+        for key, val in yaml_dict.items():
+            if type(val) == str:
+                yaml_dict[key] = quoted(val)
         with open(path_yaml, 'w') as yf:
             yaml.dump(yaml_dict, yf, sort_keys=False, default_flow_style=None)
-
 print("Success!")
 
 
