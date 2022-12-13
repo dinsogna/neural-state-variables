@@ -4,55 +4,98 @@ from subprocess import Popen
 import shlex
 import multiprocessing
 import signal, psutil
+import re
+import numpy as np
 
-def run(seed1, seed2, num_train_latent, num_train_state, gpus):
+    # FURTHER THINGS TO DO
+    #   Have the name of the screen reflect the name of the thing 
+    #       - maybe add seed so you can run multiple
+    #   save the output of the script in .tex files so they are easily accesible
+    #   git from Kevin the adjustments for the smoothing
+    #   run low cost tests and build up from there
+    #   block gpu access for a while
+        #implemented this for latent
+        # to test first run it on 1 gpu 2,2 to see if that can work then run on 2 gpus
 
-    #avaliable_gpus = gpus.copy() # at first all gpus are avaliable
+    #Need Kevin to Commit 
+    #- visual state vars
+    #- values of lambda
+    #- 0.05 and 1
+    #- epochs - 10 and 10
+
+
+def run(seed1, seed2, script1, script2, dataset, num_train_latent, num_train_state, gpus):
+    gpus = np.sort(gpus)
+    #gpu_proc = -np.array((len(gpus))) #which process are on which gpus, not sure I need this
+    gpu_name = ["None"]*len(gpus) #which names are on which
+
+    print("gpus: ", gpus)
+    #print(gpu_proc)
+    print("gpus_cur_names: ",gpu_name)
 
     latent_p = [0]*num_train_latent
-    #latent_staer
 
     for i in range(num_train_latent):
         directory1 = "./" + seed1 + "-" + str(i)
         os.makedirs(directory1, exist_ok = True)
 
+        gpu_num = wait_until_free(gpu_name)
+
+        command = '../scripts/' + script1 + ' ' + dataset + ' ' + str(gpus[gpu_num]) + ' TRAIN_DUM-' + str(i)
+        gpu_name[gpu_num] = 'TRAIN_DUM-' + str(i) #update gpu name
         #run latent training script
-        #os.system('cd ' + directory1 +  '; ../scripts/train_latent.sh circular_motion 3')
-        command = '../scripts/train_latent.sh circular_motion 3'
-        #command = '../scripts/dum.sh'
+        print("latent: ", i)
         latent_p[i] = Popen(shlex.split(command), cwd=directory1)
-        print(i)
 
-    state_p = [0]*num_train_state*num_train_latent
-    latent_done = list()
-    while (check_running(latent_p, num_train_latent)):
         
-        for i in range(num_train_latent):
-            return_code = latent_p[i].poll()
-            if (i not in latent_done) and (return_code != 0) and (return_code != None):
-                print("return:", latent_p[i].poll())
-                latent_done.append(i)
 
+    state_p = [0]*(num_train_state*num_train_latent + 1000) # fix this
+    unfinshed_latent = list(np.arange(num_train_latent))
+    while(len(unfinshed_latent) !=0):
+        for i in unfinshed_latent:
+            name = "TRAIN_DUM-" + str(i)
+            if not check_running(name):
+                unfinshed_latent.remove(i)
+
+                #run the other ones
                 for j in range(num_train_state):
-                    print(i, ", ", j)
+                    directory1 = "./" + seed1 + "-" + str(i)
                     directory2 = seed2 + "-" + str(j)
-
                     os.makedirs(directory1+"/" + directory2, exist_ok = True )
                     directory =  directory1 + '/' + directory2
-                    command = '../../scripts/train_refine_in.sh circular_motion 4'
-                    state_p[i * num_train_latent + j] =  Popen(shlex.split(command), cwd=directory)
 
-    print (check_running(latent_p, num_train_latent))
+                    gpu_num = wait_until_free(gpu_name)
+                    print(gpu_name, gpu_num)
+                    #command = "../../scripts/dum2.sh circular_motion " + str(gpus[0]) +  " TRAIN_DUM2-" + str(i)
+                    command = '../scripts/' + script2 + ' ' + dataset + ' ' + str(gpus[gpu_num]) + ' TRAIN_DUM2-' + str(i) +"h"+ str(j) + " " + directory2
+                    print("latent: ", i, ", ", j)
+                    state_p[i * num_train_latent + j] =  Popen(shlex.split(command), cwd=directory1)
+                    gpu_name[gpu_num] = 'TRAIN_DUM2-' + str(i) +"h"+ str(j)
 
-def check_running(p, i):
-    for i in range(i):
-        #if p[i].poll() == None or p[i].poll() == 0:
-        if p[i].poll() == None:
-            return True
-    print("pid:", p[i].pid)
-    print("child-process:", child_processes(p[i].pid))
-    return False
+def wait_until_free(gpu_name): # return index when free
 
+    free = False
+    index = -1
+    while not free:
+        for i in range(len(gpu_name)):
+            if check_running(gpu_name[i]) == False:
+                index = i
+                free = True
+
+    return index
+
+
+def check_running(name):
+    cmd = "screen -ls | awk '/\." + name +  "\\t/ {print strtonum($1)}'"
+    ps = subprocess.Popen(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+    output = ps.communicate()[0]
+    all_run = re.findall(r'\d+', str(output))
+    if len(all_run) == 1:
+        return True
+    else: # if it is 0 - then we are finished and if its more than 1 then its bad
+        if len(all_run) >= 1:
+            print("ERROR: multiple screens with same name: ", output, name)
+        return False 
 
 def child_processes(parent_pid, sig=signal.SIGTERM):
     try:
@@ -65,4 +108,7 @@ def child_processes(parent_pid, sig=signal.SIGTERM):
     #for process in children:
      # process.send_signal(sig)
 
-run("run", "runa", 1, 2, 4)
+#testing scripts
+#run("testing_c", "runa", "dum.sh", "dum2.sh", "circular_motion", 1, 1, [4]) #simple script test w/o gpu blocking
+#run("testing_c", "runa", "dum.sh", "dum2.sh", "circular_motion", 3, 2, [4, 5]) #simple script test w gpu blocking
+run("actual_test_t", "run", "train_latent_f.sh", "refine_64_train_2.sh", "circular_motion", 1, 1, [2, 4, 6])
