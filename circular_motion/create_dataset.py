@@ -15,10 +15,11 @@ class CircularMotion():
       self.canvas_color = canvas_color
       self.point_color = point_color
       self.angle = random.random() * 2 * math.pi
-      self.center = (int(self.canvas_width / 2 + self.canvas_radius * math.cos(self.angle)),
-                     int(self.canvas_height / 2 - self.canvas_radius * math.sin(self.angle)))
 
    def next_frame(self):
+      self.angle = self.angle + self.point_omega / 60
+      self.center = (int(self.canvas_width / 2 + self.canvas_radius * math.cos(self.angle)),
+                     int(self.canvas_height / 2 - self.canvas_radius * math.sin(self.angle)))
       image = Image.new('RGB', (self.canvas_width, self.canvas_height))
       draw = ImageDraw.Draw(image)
       draw.rectangle((0, 0, 128, 128), fill=self.canvas_color)
@@ -26,9 +27,6 @@ class CircularMotion():
                     self.center[1] - self.point_radius,
                     self.center[0] + self.point_radius,
                     self.center[1] + self.point_radius), fill=self.point_color, outline=self.point_color)
-      self.angle = self.angle + self.point_omega / 60
-      self.center = (int(self.canvas_width / 2 + self.canvas_radius * math.cos(self.angle)),
-                     int(self.canvas_height / 2 - self.canvas_radius * math.sin(self.angle)))
       return image, self.angle
 
 def main():
@@ -66,7 +64,7 @@ def main():
          frame, all_angles[video,dt] = cm.next_frame()
          frame.save(f'circular_motion/{video}/{dt}.png')
    
-   print(all_angles)
+   # print(all_angles)
    np.save('all_angles', all_angles)
 
 if __name__ == '__main__':

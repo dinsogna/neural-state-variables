@@ -21,7 +21,15 @@ ext = args['extension']
 output = args['output']
 
 images = []
-video_idx = "_"
+if "_1" in dir_path:
+    video_idx = "4_"
+    output = "output_1.mp4"
+if "_2" in dir_path:
+    video_idx = "17_"
+    output = "output_2.mp4"
+if "_3" in dir_path:
+    video_idx = "7_"
+    output = "output_3.mp4"
 for f in os.listdir(dir_path):
     if f.endswith(ext) and (video_idx == "_" or f.startswith(video_idx)):
         images.append(f)

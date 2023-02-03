@@ -14,7 +14,7 @@ if __name__ == '__main__':
     if not os.path.isdir(save_log):
         os.makedirs(save_log)
 
-    for f in ['ids.npy', 'latent.npy', 'reconstructed_latent.npy', 'refine_latent.npy']:
+    for f in os.listdir(log):
         path = os.path.join(log, f)
         data = np.load(path)
         save_path = os.path.join(save_log, f)

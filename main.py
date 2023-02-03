@@ -74,7 +74,7 @@ def main():
                       checkpoint_callback=checkpoint_callback)
 
     trainer.fit(model)
-    #Save the training loss
+    # Save the training loss
     # save_dir = os.path.join("./loss_logs", log_dir)
     # np.save(save_dir, model.train_loss_logs)
 
