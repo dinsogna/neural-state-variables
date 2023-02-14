@@ -14,7 +14,7 @@ from collections import OrderedDict
 from torch.utils.data import DataLoader
 from torchvision.utils import save_image
 from dataset import NeuralPhysDataset
-from schedulers import CyclicLambdaScheduler
+from schedulers import CyclicLambdaScheduler, LinearDecayScheduler, ExpDecayScheduler, ExpDecaySchedulerWarmup
 from model_utils import (EncoderDecoder,
                          EncoderDecoder64x1x1,
                          RefineDoublePendulumModel,
@@ -50,8 +50,7 @@ class VisDynamicsModel(pl.LightningModule):
                  model_name: str='encoder-decoder-64',
                  data_filepath: str='data',
                  dataset: str='single_pendulum',
-                 lr_schedule: list=[20, 50, 100],
-                 lambda_schedule: list=[0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,]) -> None:
+                 lr_schedule: list=[20, 50, 100]) -> None:
         super().__init__()
         self.save_hyperparameters()
         self.kwargs = {'num_workers': self.hparams.num_workers, 'pin_memory': True} if self.hparams.if_cuda else {}
@@ -61,21 +60,31 @@ class VisDynamicsModel(pl.LightningModule):
         if not self.hparams.if_test:
             mkdir(self.pred_log_dir)
             mkdir(self.var_log_dir)
-        # ex1
-        self.latent_lambda_scheduler = CyclicLambdaScheduler(step_size=512, max_lda=40.0)
-        # s1
-        # self.refine_lambda_scheduler = CyclicLambdaScheduler(max_lda=1e-5)
-        # s2
-        self.refine_lambda_scheduler = CyclicLambdaScheduler(max_lda=1e-4)
+        # l0
+        # self.latent_lambda_scheduler = CyclicLambdaScheduler(benchmark=True)
+        # r0
+        # self.refine_lambda_scheduler = CyclicLambdaScheduler(benchmark=True)
 
+        # circular_motion: latent_lambda = 1.0 cyclic; refine_lambda = 1e-5 cyclic
+        # l1
+        self.latent_lambda_scheduler = ExpDecaySchedulerWarmup(step_size=5000,
+                                                         warmup_steps=1000,
+                                                         min_lda=1e-2,
+                                                         max_lda=1.0,
+                                                         val_lda=1e-2)
+        # r1
+        # self.refine_lambda_scheduler = ExpDecaySchedulerWarmup(step_size=5000,
+        #                                                        warmup_steps=1000,
+        #                                                        min_lda=1e-5,
+        #                                                        max_lda=1e-3,
+        #                                                        val_lda=1e-5)
+        # r2
+        self.refine_lambda_scheduler = ExpDecaySchedulerWarmup(step_size=2500,
+                                                               warmup_steps=500,
+                                                               min_lda=1e-6,
+                                                               max_lda=1e-4,
+                                                               val_lda=1e-6)
         self.__build_model()
-        
-        #DOM: store training losses / valuable data here
-        # self.train_loss_logs = {"loss":[], "recon": [], "reg":[]}
-        # self.loss_log_dir = os.path.join("./loss_logs", "_", self.hparams.seed)
-        # self.train_loss_log = []
-        # self.val_loss_logs = dict()
-        # self.test_loss_logs = dict()
 
     def __build_model(self):
         if self.hparams.model_name == 'encoder-decoder':
@@ -102,156 +111,17 @@ class VisDynamicsModel(pl.LightningModule):
             self.model = RefineReactionDiffusionModel(in_channels=64)
         if 'refine' in self.hparams.model_name and self.hparams.if_test:
             self.high_dim_model = EncoderDecoder64x1x1(in_channels=3)
-    
-    # def latent_lambda_scheduler(self, epoch, training=False):
-        # lda = 0.8 * np.exp(-epoch / 20)
-        # return lda
 
-        # s1
-        # if epoch < 5:
-        #     return 0.0
-        # if epoch < 10:
-        #     return 1e-3
-        # if epoch < 15:
-        #     return 1e-2
-        # if epoch < 20:
-        #     return 5e-2
-        # return 0.1
-
-        # s2
-        # if epoch < 5:
-        #     return 0.0
-        # if epoch < 10:
-        #     return 1e-2
-        # if epoch < 15:
-        #     return 0.1
-        # if epoch < 20:
-        #     return 0.5
-        # return 1.0
-
-        # s3
-        # if epoch < 5:
-        #     return 0.0
-        # if epoch < 10:
-        #     return 1e-1
-        # if epoch < 15:
-        #     return 1.0
-        # if epoch < 20:
-        #     return 5.0
-        # return 10.0
-
-        # s4
-        # if epoch < 5:
-        #     return 0.0
-        # if epoch < 10:
-        #     return 1.0
-        # if epoch < 15:
-        #     return 8.0
-        # if epoch < 20:
-        #     return 32.0
-        # return 64.0
-
-        # s5
-        # if not training:
-        #     return 40.0
-        # if epoch < 5:
-        #     return 0.0
-        # if epoch < 10:
-        #     return 1.0
-        # if epoch < 15:
-        #     return 5.0
-        # if epoch < 20:
-        #     return 20.0
-        # return 40.0
-    
-    # def refine_lambda_scheduler(self, epoch, training=False):
-        # s0
-        # return 0.0
-
-        # s1
-        # if epoch < 20:
-        #     return 0.0
-        # if epoch < 30:
-        #     return 1e-5
-        # if epoch < 40
-        #     return 5e-5
-        # if epoch < 50
-        #     return 1e-4
-
-        # s2
-        # stage = epoch // 10
-        # if stage < 2:
-        #     return 0.0
-        # if stage == 9:
-        #     return 1e-3
-        # return 1e-5 * (2 ** (stage - 2))
-
-        # s3
-        # if not training:
-        #     return 1e-3
-        # it = epoch % 25
-        # if it < 5:
-        #     return 0.0
-        # if it < 10:
-        #     return 1e-5
-        # if it < 15:
-        #     return 1e-4
-        # if it < 20:
-        #     return 5e-4
-        # return 1e-3
-
-        # s4
-        # if not training:
-        #     return 5e-4
-        # it = epoch % 25
-        # if it < 5:
-        #     return 0.0
-        # if it < 10:
-        #     return 5e-6
-        # if it < 15:
-        #     return 5e-5
-        # if it < 20:
-        #     return 2e-4
-        # return 5e-4
-
-        # s5
-        # if not training:
-        #     return 1e-4
-        # it = epoch % 25
-        # if it < 5:
-        #     return 0.0
-        # if it < 10:
-        #     return 1e-6
-        # if it < 15:
-        #     return 1e-5
-        # if it < 20:
-        #     return 5e-5
-        # return 1e-4
-
-        # s6
-        # if not training:
-        #     return 1e-5
-        # it = epoch % 25
-        # if it < 5:
-        #     return 0.0
-        # if it < 10:
-        #     return 1e-7
-        # if it < 15:
-        #     return 1e-6
-        # if it < 20:
-        #     return 5e-6
-        # return 1e-5
-    
-    # Loss = lambda*recon_loss + (1-lambda)*smoothing_loss
-    def loss_func(self, data, output, latent, target, training=False, all_losses=False): 
+    def loss_func(self, data, output, latent, target, training=False, all_losses=False):
         recon_loss = self.recon_loss_func(output, target)
         if 'refine' in self.hparams.model_name:
-            # lda = self.refine_lambda_scheduler(self.trainer.current_epoch, training=training)
             lda = self.refine_lambda_scheduler.select_lambda(training)
-            reg_loss = self.refine_reg_loss_func(data)
+            reg_loss = self.refine_reg_loss_func(data, output, latent)
         else:
             lda = self.latent_lambda_scheduler.select_lambda(training)
-            reg_loss = self.latent_reg_loss_func(output, latent, target)            
+            reg_loss = self.latent_reg_loss_func(data, output, latent, target) 
+        if training:   
+            self.log('lambda', lda, on_step=True, on_epoch=False, prog_bar=True, logger=True)        
         loss = recon_loss + lda * reg_loss
         if all_losses:
             return loss, recon_loss, reg_loss
@@ -264,33 +134,58 @@ class VisDynamicsModel(pl.LightningModule):
         loss = torch.sum(mse_loss(output, target), dim=1)
         loss = torch.mean(loss)
         return loss
-    
-    def refine_reg_loss_func(self, data):
 
+    def latent_reg_loss_func(self, data, output, latent, target):
+        mse_loss = nn.MSELoss(reduction='none')
+        final_dim = data.shape[-1] // 2
+
+        X_2dt = torch.cat([data[:, :, :, final_dim:], target[:, :, :, :final_dim]], dim=3)
+        output_dt, latent_dt = output, latent                 # (batch, 64, 1, 1)
+        output_2dt, latent_2dt = self.train_forward(X_2dt)    # (batch, 64, 1, 1)
+        output_3dt, latent_3dt = self.train_forward(target)   # (batch, 64, 1, 1)
+
+        combined_latent = torch.cat([latent_dt, latent_2dt, latent_3dt])    # (3*batch, 64, 1, 1)
+        dim_means = torch.mean(combined_latent, dim=0, keepdim=True)        # (1, 64, 1, 1)
+        dim_stds = torch.std(combined_latent, dim=0, keepdim=True) + 1e-7   # (1, 64, 1, 1)
+
+        scaled_latent_dt = torch.div(torch.sub(latent_dt, dim_means), dim_stds)
+        scaled_latent_2dt = torch.div(torch.sub(latent_2dt, dim_means), dim_stds)
+        scaled_latent_3dt = torch.div(torch.sub(latent_3dt, dim_means), dim_stds)
+
+        deriv_1_dt = scaled_latent_2dt - scaled_latent_dt     # (batch, 64, 1, 1)
+        deriv_1_2dt = scaled_latent_3dt - scaled_latent_2dt   # (batch, 64, 1, 1)
+        deriv_2_dt = deriv_1_2dt - deriv_1_dt                 # (batch, 64, 1, 1)
+
+        deriv_1_dt_loss = torch.mean(torch.sum(torch.square(deriv_1_dt), dim=1))
+        deriv_1_2dt_loss = torch.mean(torch.sum(torch.square(deriv_1_2dt), dim=1))
+        deriv_2_dt_loss = torch.mean(torch.sum(torch.square(deriv_2_dt), dim=1))
+
+        reg_loss = deriv_1_dt_loss + deriv_1_2dt_loss + deriv_2_dt_loss
+        return reg_loss
+    
+    def refine_reg_loss_func(self, data, output, latent):
         def _sum_encoder(data):
             assert data.requires_grad
-            output, latent = self.train_forward(data)
-            _sum_latent = latent.sum(dim=0)
+            output, latent = self.train_forward(data)   # data: (batch, 64)   latent: (batch, dim)
+            _sum_latent = latent.sum(dim=0)   # _sum_latent: (dim)
             assert _sum_latent.requires_grad
             return _sum_latent
         
         with torch.enable_grad():
             data.requires_grad_()
-            J = jacobian(_sum_encoder, data, create_graph=True).permute(1,0,2)
-        F_norm = torch.linalg.norm(J, dim=[1,2])
+            J = jacobian(_sum_encoder, data, create_graph=True)   # J: (dim, batch, 64)
+        maxs, _ = torch.max(latent, dim=0)
+        mins, _ = torch.min(latent, dim=0)
+        scale_factor = torch.sub(maxs, mins) / 2
+        dim_stds = torch.unsqueeze(torch.unsqueeze(torch.std(latent, dim=0), 1), 1) + 1e-7
+        scale_factor = torch.unsqueeze(torch.unsqueeze(scale_factor, 1), 1)
+        scaled_J = torch.div(J, scale_factor)
+        scaled_J = torch.div(J, dim_stds)
+        scaled_J = scaled_J.permute(1,0,2)   # scaled_J: (batch, dim, 64)
+        F_norm = torch.linalg.norm(scaled_J, dim=[1,2])
+        # F_norm = torch.linalg.norm(J, dim=[1,2])
         reg_loss = torch.mean(torch.square(F_norm))
         return reg_loss
-    
-    def latent_reg_loss_func(self, output, latent, target):
-        mse_loss = nn.MSELoss(reduction='none')
-        next_output, next_latent = self.train_forward(target)
-        latent_loss = torch.sum(mse_loss(latent, next_latent), dim=1)
-        latent_norm = torch.linalg.norm(latent, dim=1)
-        next_latent_norm = torch.linalg.norm(next_latent, dim=1)
-        prod_norm = torch.mul(latent_norm, next_latent_norm)
-        scaled_latent_loss = torch.div(latent_loss, prod_norm)
-        scaled_latent_loss = torch.mean(scaled_latent_loss)
-        return scaled_latent_loss
 
     def train_forward(self, x):
         if self.hparams.model_name == 'encoder-decoder' or 'refine' in self.hparams.model_name:
@@ -306,8 +201,8 @@ class VisDynamicsModel(pl.LightningModule):
         # Recon + Smoothing loss
         train_loss, train_recon_loss, train_reg_loss = self.loss_func(data, output, latent, target, training=True, all_losses=True)
         self.log('train_loss', train_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('train_reconstruction_loss', train_recon_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('train_regularization_loss', train_reg_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train_rec_loss', train_recon_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train_reg_loss', train_reg_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
         return train_loss
 
@@ -317,8 +212,8 @@ class VisDynamicsModel(pl.LightningModule):
 
         val_loss, val_recon_loss, val_reg_loss = self.loss_func(data, output, latent, target, all_losses=True)
         self.log('val_loss', val_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('val_reconstruction_loss', val_recon_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('val_regularization_loss', val_reg_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val_rec_loss', val_recon_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val_reg_loss', val_reg_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return val_loss
 
     def test_step(self, batch, batch_idx):

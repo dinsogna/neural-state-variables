@@ -52,8 +52,7 @@ def main():
                              model_name=cfg.model_name,
                              data_filepath=cfg.data_filepath,
                              dataset=cfg.dataset,
-                             lr_schedule=cfg.lr_schedule,
-                             lambda_schedule=cfg.lambda_schedule)
+                             lr_schedule=cfg.lr_schedule)
 
     # define callback for selecting checkpoints during training
     checkpoint_callback = ModelCheckpoint(
