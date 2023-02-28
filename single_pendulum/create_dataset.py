@@ -2,91 +2,81 @@ import matplotlib
 matplotlib.use('Agg')
 
 import sys, os
+import matplotlib
+matplotlib.use('Agg')
+
+import os
+import shutil
 import numpy as np
-from scipy.integrate import odeint
+from scipy.integrate import solve_ivp
+
+import io
+from PIL import Image
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 
-np.random.seed(42)
-tmax, dt = 3, 0.01
-t = np.arange(0, tmax, dt)
-EDRIFT = 0.0002
-fps = 20
-di = int(1/fps/dt)
-    
-L = 1
-m = 1
-g = 9.81
-r = 0.18
+def mkdir(folder):
+    if os.path.exists(folder):
+        shutil.rmtree(folder)
+    os.makedirs(folder)
 
-def deriv(y, t, L, m):
-    theta, omega = y
-    theta_dot = omega
-    omega_dot = -g/L * np.sin(theta)
-    return theta_dot, omega_dot
-    
-def calc_E(y):
-    theta, omega = y.T
-    V = -m * L * g * np.cos(theta)
-    T = 0.5 * m * (L * omega)**2
-    return T + V
+def engine(rng, num_frm, fps=60):
+    m = 1.0
+    l = 0.5
+    g = 9.81
+    dt = 1.0 / fps
+    t_eval = np.arange(num_frm) * dt
 
-def make_plot(ax, x, y, i, idx):
-    ax.plot([0, x[i]], [0, y[i]], lw=2, c='k')
+    f = lambda t, y: [y[1], -3*g/(2*l) * np.sin(y[0])]
+    initial_state = [rng.uniform(-np.pi, np.pi), rng.uniform(-5, 5)]
+    sol = solve_ivp(f, [t_eval[0], t_eval[-1]], initial_state, t_eval=t_eval, rtol=1e-6)
+    
+    states = sol.y.T
+    return states
+
+def render(ax, theta, image_filepath):
+    L = 0.8
+    r = 0.15
+    border = 0.2
+    x = L * np.sin(theta)
+    y = -L * np.cos(theta)
+    
+    ax.plot([0, x], [0, y], lw=2, c='k')
     c0 = Circle((0, 0), r/4, fc='k', zorder=10)
-    c1 = Circle((x[i], y[i]), r, fc='b', ec='b', zorder=10)
+    c1 = Circle((x, y), r, fc='b', ec='b', zorder=10)
     ax.add_patch(c0)
     ax.add_patch(c1)
 
-    ax.set_xlim(-L-r, L+r)
-    ax.set_ylim(-L-r, L+r)
+    ax.set_xlim(-L-r-border, L+r+border)
+    ax.set_ylim(-L-r-border, L+r+border)
     ax.set_aspect('equal', adjustable='box')
     plt.axis('off')
-    plt.savefig(f'single_pendulum_tmp/{idx}/{i//di}.png', bbox_inches=None, pad_inches=0.0)
+    img_buf = io.BytesIO()
+    plt.savefig(img_buf, format='png', bbox_inches=None, pad_inches=0.0)
+    im = Image.open(img_buf).convert('RGB')
+    im.save(image_filepath)
     plt.cla()
 
-def main():
-    theta_min, theta_max = -np.pi, np.pi
-    omega_min, omega_max = -2.0, 2.0
-   
-    theta_all, omega_all = [], []
-    num_videos = int(input('Enter number of videos to generate: '))
-    for video in range(num_videos):
-        if not os.path.exists(f'single_pendulum_tmp/{video}'):
-            os.mkdir(f'single_pendulum_tmp/{video}')
-        fails = 0
-        while True:
-            init_theta = np.random.random() * (theta_max - theta_min) + theta_min
-            init_omega = np.random.random() * (omega_max - omega_min) + omega_min
-            y0 = np.array([init_theta, init_omega])
-            y = odeint(deriv, y0, t, args=(L, m))
-            E = calc_E(y0)
-            if np.max(np.sum(np.abs(calc_E(y) - E))) > EDRIFT:
-                fails += 1
-                # print(f'Failed {fails} times')
-            else:
-                # print('Success')
-                break
-        theta, omega = y[:,0], y[:,1]
-        length_scale = 0.8
-        x = length_scale * L * np.sin(theta)
-        y = -length_scale * L * np.cos(theta)
-         
-        fig = plt.figure(figsize=(1.28,1.28))
-        ax = fig.add_subplot(111)
-        
-        for i in range(0, t.size, di):
-            make_plot(ax, x, y, i, video)
-        plt.close()
-        theta_all.append(theta[::di])
-        omega_all.append(omega[::di])
-
-        if (video+1) % 100 == 0:
-            print(f'Generated {video+1} videos!')
-    theta_all = np.array(theta_all)
-    omega_all = np.array(omega_all)
-    np.savez('vars.npz', theta=theta_all, omega=omega_all)
-    print('Saved variables!')
+def make_data(data_filepath, num_seq, num_frm, seed=0):
+    mkdir(data_filepath)
+    rng = np.random.default_rng(seed)
+    states = np.zeros((num_seq, num_frm, 2))
+    
+    fig = plt.figure(figsize=(1.28,1.28))
+    ax = fig.add_subplot(111)
+    
+    for n in range(num_seq):
+        seq_filepath = os.path.join(data_filepath, str(n))
+        mkdir(seq_filepath)
+        states[n, :, :] = engine(rng, num_frm)
+        if n > 964:
+            for k in range(num_frm):
+                render(ax, states[n, k, 0], os.path.join(seq_filepath, str(k)+'.png'))
+        if (n+1) % 10 == 0:
+            print(f'Generated {n+1} videos!')
+    
+    np.save('./states.npy', states)
 
 if __name__ == '__main__':
-    main()
+    data_filepath = './single_pendulum'
+    make_data(data_filepath, num_seq=1200, num_frm=60)
