@@ -17,7 +17,8 @@ from matplotlib.patches import Circle
 
 def mkdir(folder):
     if os.path.exists(folder):
-        shutil.rmtree(folder)
+        # shutil.rmtree(folder)
+        pass
     os.makedirs(folder)
 
 def engine(rng, num_frm, fps=60):
@@ -69,9 +70,8 @@ def make_data(data_filepath, num_seq, num_frm, seed=0):
         seq_filepath = os.path.join(data_filepath, str(n))
         mkdir(seq_filepath)
         states[n, :, :] = engine(rng, num_frm)
-        if n > 964:
-            for k in range(num_frm):
-                render(ax, states[n, k, 0], os.path.join(seq_filepath, str(k)+'.png'))
+        for k in range(num_frm):
+            render(ax, states[n, k, 0], os.path.join(seq_filepath, str(k)+'.png'))
         if (n+1) % 10 == 0:
             print(f'Generated {n+1} videos!')
     
