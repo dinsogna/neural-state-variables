@@ -62,6 +62,6 @@ if __name__ == '__main__':
     if not os.path.exists(summary_folder):
         print(f'Creating summary folder at {summary_folder}')
         os.makedirs(summary_folder)
-    save_loss(version_folder, summary_folder)
+    # save_loss(version_folder, summary_folder)
     save_video(predictions_folder, summary_folder)
     save_variables(variables_folder, summary_folder)

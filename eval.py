@@ -201,7 +201,7 @@ def gather_latent_from_trained_high_dim_model():
     # prepare train and val loader
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                                batch_size=cfg.train_batch,
-                                               shuffle=True,
+                                               shuffle=False,
                                                **kwargs)
     val_loader = torch.utils.data.DataLoader(dataset=val_dataset,
                                              batch_size=cfg.val_batch,
@@ -213,14 +213,19 @@ def gather_latent_from_trained_high_dim_model():
     all_latents = []
     var_log_dir = os.path.join(log_dir, 'variables')
     for batch_idx, (data, target, filepath) in enumerate(tqdm(train_loader)):
+        filepath = np.transpose(filepath)
+        batch_size, frames = data.shape[0], data.shape[1]
+        flatten_data = data.flatten(0,1)
+        flatten_target = target.flatten(0,1)
+        flatten_filepath = filepath.flatten()
         if cfg.model_name == 'encoder-decoder':
             output, latent = model.model(data.cuda())
         if cfg.model_name == 'encoder-decoder-64':
-            output, latent = model.model(data.cuda(), data.cuda(), False)
+            flatten_output, flatten_latent = model.model(flatten_data.cuda(), flatten_data.cuda(), False)
         # save the latent vectors
-        all_filepaths.extend(filepath)
-        for idx in range(data.shape[0]):
-            latent_tmp = latent[idx].view(1, -1)[0]
+        all_filepaths.extend(flatten_filepath)
+        for idx in range(flatten_data.shape[0]):
+            latent_tmp = flatten_latent[idx].view(1, -1)[0]
             latent_tmp = latent_tmp.cpu().detach().numpy()
             all_latents.append(latent_tmp)
 
@@ -233,14 +238,19 @@ def gather_latent_from_trained_high_dim_model():
     all_latents = []
     var_log_dir = os.path.join(log_dir, 'variables')
     for batch_idx, (data, target, filepath) in enumerate(tqdm(val_loader)):
+        filepath = np.transpose(filepath)
+        batch_size, frames = data.shape[0], data.shape[1]
+        flatten_data = data.flatten(0,1)
+        flatten_target = target.flatten(0,1)
+        flatten_filepath = filepath.flatten()
         if cfg.model_name == 'encoder-decoder':
-            output, latent = model.model(data.cuda())
+            flatten_output, flatten_latent = model.model(flatten_data.cuda())
         if cfg.model_name == 'encoder-decoder-64':
-            output, latent = model.model(data.cuda(), data.cuda(), False)
+            flatten_output, flatten_latent = model.model(flatten_data.cuda(), flatten_data.cuda(), False)
         # save the latent vectors
-        all_filepaths.extend(filepath)
-        for idx in range(data.shape[0]):
-            latent_tmp = latent[idx].view(1, -1)[0]
+        all_filepaths.extend(flatten_filepath)
+        for idx in range(flatten_data.shape[0]):
+            latent_tmp = flatten_latent[idx].view(1, -1)[0]
             latent_tmp = latent_tmp.cpu().detach().numpy()
             all_latents.append(latent_tmp)
 
@@ -305,7 +315,7 @@ def gather_latent_from_trained_refine_model():
     # prepare train and val loader
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                                batch_size=cfg.train_batch,
-                                               shuffle=True,
+                                               shuffle=False,
                                                **kwargs)
     val_loader = torch.utils.data.DataLoader(dataset=val_dataset,
                                              batch_size=cfg.val_batch,
@@ -319,21 +329,27 @@ def gather_latent_from_trained_refine_model():
     all_reconstructed_latents = []
     var_log_dir = os.path.join(log_dir, 'variables')
     for batch_idx, (data, target, filepath) in enumerate(tqdm(train_loader)):
-        _, latent = model.high_dim_model(data.cuda(), data.cuda(), False)
-        latent = latent.squeeze(-1).squeeze(-1)
-        latent_reconstructed, latent_latent = model.model(latent)
+        filepath = np.transpose(filepath)
+        batch_size, frames = data.shape[0], data.shape[1]
+        flatten_data = data.flatten(0,1)
+        flatten_target = target.flatten(0,1)
+        flatten_filepath = filepath.flatten()
+
+        _, flatten_latent = model.high_dim_model(flatten_data.cuda(), flatten_data.cuda(), False)
+        flatten_latent = flatten_latent.squeeze(-1).squeeze(-1)
+        flatten_latent_reconstructed, flatten_latent_latent = model.model(flatten_latent)
         # save the latent vectors
-        all_filepaths.extend(filepath)
-        for idx in range(data.shape[0]):
-            latent_tmp = latent[idx].view(1, -1)[0]
+        all_filepaths.extend(flatten_filepath)
+        for idx in range(flatten_data.shape[0]):
+            latent_tmp = flatten_latent[idx].view(1, -1)[0]
             latent_tmp = latent_tmp.cpu().detach().numpy()
             all_latents.append(latent_tmp)
             # save latent_latent: the latent vector in the refine network
-            latent_latent_tmp = latent_latent[idx].view(1, -1)[0]
+            latent_latent_tmp = flatten_latent_latent[idx].view(1, -1)[0]
             latent_latent_tmp = latent_latent_tmp.cpu().detach().numpy()
             all_refine_latents.append(latent_latent_tmp)
             # save latent_reconstructed: the latent vector reconstructed by the entire refine network
-            latent_reconstructed_tmp = latent_reconstructed[idx].view(1, -1)[0]
+            latent_reconstructed_tmp = flatten_latent_reconstructed[idx].view(1, -1)[0]
             latent_reconstructed_tmp = latent_reconstructed_tmp.cpu().detach().numpy()
             all_reconstructed_latents.append(latent_reconstructed_tmp)
 
@@ -350,21 +366,27 @@ def gather_latent_from_trained_refine_model():
     all_reconstructed_latents = []
     var_log_dir = os.path.join(log_dir, 'variables')
     for batch_idx, (data, target, filepath) in enumerate(tqdm(val_loader)):
-        _, latent = model.high_dim_model(data.cuda(), data.cuda(), False)
-        latent = latent.squeeze(-1).squeeze(-1)
-        latent_reconstructed, latent_latent = model.model(latent)
+        filepath = np.transpose(filepath)
+        batch_size, frames = data.shape[0], data.shape[1]
+        flatten_data = data.flatten(0,1)
+        flatten_target = target.flatten(0,1)
+        flatten_filepath = filepath.flatten()
+
+        _, flatten_latent = model.high_dim_model(flatten_data.cuda(), flatten_data.cuda(), False)
+        flatten_latent = flatten_latent.squeeze(-1).squeeze(-1)
+        flatten_latent_reconstructed, flatten_latent_latent = model.model(flatten_latent)
         # save the latent vectors
-        all_filepaths.extend(filepath)
-        for idx in range(data.shape[0]):
-            latent_tmp = latent[idx].view(1, -1)[0]
+        all_filepaths.extend(flatten_filepath)
+        for idx in range(flatten_data.shape[0]):
+            latent_tmp = flatten_latent[idx].view(1, -1)[0]
             latent_tmp = latent_tmp.cpu().detach().numpy()
             all_latents.append(latent_tmp)
             # save latent_latent: the latent vector in the refine network
-            latent_latent_tmp = latent_latent[idx].view(1, -1)[0]
+            latent_latent_tmp = flatten_latent_latent[idx].view(1, -1)[0]
             latent_latent_tmp = latent_latent_tmp.cpu().detach().numpy()
             all_refine_latents.append(latent_latent_tmp)
             # save latent_reconstructed: the latent vector reconstructed by the entire refine network
-            latent_reconstructed_tmp = latent_reconstructed[idx].view(1, -1)[0]
+            latent_reconstructed_tmp = flatten_latent_reconstructed[idx].view(1, -1)[0]
             latent_reconstructed_tmp = latent_reconstructed_tmp.cpu().detach().numpy()
             all_reconstructed_latents.append(latent_reconstructed_tmp)
 

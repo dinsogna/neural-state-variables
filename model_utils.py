@@ -7,7 +7,7 @@ def conv2d_bn_relu(inch,outch,kernel_size,stride=1,padding=1):
     convlayer = torch.nn.Sequential(
         torch.nn.Conv2d(inch,outch,kernel_size=kernel_size,stride=stride,padding=padding),
         torch.nn.BatchNorm2d(outch),
-        torch.nn.ReLU()
+        torch.nn.ReLU6()
     )
     return convlayer
 
@@ -124,6 +124,7 @@ class EncoderDecoder(torch.nn.Module):
         out = self.decoder(latent)
         return out, latent
 
+
 class EncoderDecoder64x1x1(torch.nn.Module):
     def __init__(self, in_channels):
         super(EncoderDecoder64x1x1,self).__init__()
@@ -239,7 +240,7 @@ class EncoderDecoder64x1x1(torch.nn.Module):
         concat_6 = torch.cat([deconv7_out,predict_7_out],dim=1)
         deconv6_out = self.deconv_6(concat_6)
         predict_6_out = self.up_sample_6(self.predict_6(concat_6))
-
+        
         concat_5 = torch.cat([deconv6_out,predict_6_out],dim=1)
         deconv5_out = self.deconv_5(concat_5)
         predict_5_out = self.up_sample_5(self.predict_5(concat_5))
@@ -261,10 +262,15 @@ class EncoderDecoder64x1x1(torch.nn.Module):
         return predict_out
         
 
-    def forward(self,x, reconstructed_latent, refine_latent):
+    def forward(self, x, reconstructed_latent, refine_latent, noisy=False):
         if refine_latent != True:
             latent = self.encoder(x)
-            out = self.decoder(latent)
+            if noisy:
+                noise = 0.002 * torch.randn(latent.shape).cuda()
+                # print('noisy')
+                out = self.decoder(latent + noise)
+            else:
+                out = self.decoder(latent)
             return out, latent
         else:
             latent = self.encoder(x)
@@ -277,6 +283,7 @@ class SirenLayer(nn.Module):
         self.in_f = in_f
         self.w0 = w0
         self.linear = nn.Linear(in_f, out_f)
+        self.relu = nn.ReLU6()
         self.is_first = is_first
         self.is_last = is_last
         self.init_weights()
@@ -289,6 +296,7 @@ class SirenLayer(nn.Module):
     def forward(self, x):
         x = self.linear(x)
         return x if self.is_last else torch.sin(self.w0 * x)
+        # return torch.sin(self.w0 * x)
 
 class RefineDoublePendulumModel(torch.nn.Module):
     def __init__(self, in_channels):

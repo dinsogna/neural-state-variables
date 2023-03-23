@@ -62,20 +62,29 @@ def main():
         mode='min',
         prefix='')
 
+    if not os.path.exists(log_dir + '/lightning_logs/checkpoints/'):
+        last_checkpoint = None
+    else:
+        checkpoints = os.listdir(log_dir + '/lightning_logs/checkpoints/')
+        if len(checkpoints) == 0:
+            last_checkpoint = None
+        else:
+            last_checkpoint = log_dir + '/lightning_logs/checkpoints/' + checkpoints[-1]
+
     # define trainer
+    print(f'Resuming from last checkpoint: {last_checkpoint}')
     trainer = Trainer(gpus=cfg.num_gpus,
-                      max_epochs=cfg.epochs,
-                      deterministic=True,
-                      accelerator='ddp',
-                      amp_backend='native',
-                      default_root_dir=log_dir,
-                      val_check_interval=1.0,
-                      checkpoint_callback=checkpoint_callback)
+                    max_epochs=cfg.epochs,
+                    deterministic=True,
+                    accelerator='ddp',
+                    amp_backend='native',
+                    default_root_dir=log_dir,
+                    val_check_interval=1.0,
+                    resume_from_checkpoint=last_checkpoint,
+                    checkpoint_callback=checkpoint_callback,
+                    reload_dataloaders_every_epoch=True)
 
     trainer.fit(model)
-    # Save the training loss
-    # save_dir = os.path.join("./loss_logs", log_dir)
-    # np.save(save_dir, model.train_loss_logs)
 
 def main_latentpred():
     config_filepath = str(sys.argv[2])

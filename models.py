@@ -1,4 +1,8 @@
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
+import time
 import os
 import torch
 import shutil
@@ -13,7 +17,7 @@ from torch.autograd.functional import jacobian
 from collections import OrderedDict
 from torch.utils.data import DataLoader
 from torchvision.utils import save_image
-from dataset import NeuralPhysDataset
+from dataset import NeuralPhysDataset, NeuralPhysRefineDataset
 from schedulers import CyclicLambdaScheduler, LinearDecayScheduler, ExpDecayScheduler, ExpDecaySchedulerWarmup
 from model_utils import (EncoderDecoder,
                          EncoderDecoder64x1x1,
@@ -61,29 +65,22 @@ class VisDynamicsModel(pl.LightningModule):
             mkdir(self.pred_log_dir)
             mkdir(self.var_log_dir)
         # l0
-        # self.latent_lambda_scheduler = CyclicLambdaScheduler(benchmark=True)
+        # self.latent_lambda_scheduler = ExpDecaySchedulerWarmup(benchmark=True)
         # r0
-        # self.refine_lambda_scheduler = CyclicLambdaScheduler(benchmark=True)
+        # self.refine_lambda_scheduler = ExpDecaySchedulerWarmup(benchmark=True)
 
-        # circular_motion: latent_lambda = 1.0 cyclic; refine_lambda = 1e-5 cyclic
         # l1
-        self.latent_lambda_scheduler = ExpDecaySchedulerWarmup(step_size=5000,
-                                                         warmup_steps=1000,
-                                                         min_lda=1e-2,
-                                                         max_lda=1.0,
-                                                         val_lda=1e-2)
+        self.latent_lambda_scheduler = ExpDecaySchedulerWarmup(step_size=120 * 10,
+                                                               warmup_steps=120 * 2,
+                                                               min_lda=1e-2,
+                                                               max_lda=1.0,
+                                                               val_lda=1e-2)
         # r1
-        # self.refine_lambda_scheduler = ExpDecaySchedulerWarmup(step_size=5000,
-        #                                                        warmup_steps=1000,
-        #                                                        min_lda=1e-5,
-        #                                                        max_lda=1e-3,
-        #                                                        val_lda=1e-5)
-        # r2
-        self.refine_lambda_scheduler = ExpDecaySchedulerWarmup(step_size=2500,
-                                                               warmup_steps=500,
-                                                               min_lda=1e-6,
-                                                               max_lda=1e-4,
-                                                               val_lda=1e-6)
+        self.refine_lambda_scheduler = ExpDecaySchedulerWarmup(step_size=60 * 20,
+                                                               warmup_steps=60 * 4,
+                                                               min_lda=1e-5,
+                                                               max_lda=1e-3,
+                                                               val_lda=1e-5)
         self.__build_model()
 
     def __build_model(self):
@@ -116,12 +113,12 @@ class VisDynamicsModel(pl.LightningModule):
         recon_loss = self.recon_loss_func(output, target)
         if 'refine' in self.hparams.model_name:
             lda = self.refine_lambda_scheduler.select_lambda(training)
-            reg_loss = self.refine_reg_loss_func(data, output, latent)
+            reg_loss = self.refine_reg_loss_func(latent)
         else:
             lda = self.latent_lambda_scheduler.select_lambda(training)
-            reg_loss = self.latent_reg_loss_func(data, output, latent, target) 
+            reg_loss = self.latent_reg_loss_func(latent)
         if training:   
-            self.log('lambda', lda, on_step=True, on_epoch=False, prog_bar=True, logger=True)        
+            self.log('lambda', lda, on_step=True, on_epoch=False, prog_bar=True, logger=True) 
         loss = recon_loss + lda * reg_loss
         if all_losses:
             return loss, recon_loss, reg_loss
@@ -131,146 +128,153 @@ class VisDynamicsModel(pl.LightningModule):
     def recon_loss_func(self, output, target):
         mse_loss = nn.MSELoss(reduction='none')
         output, target = output.squeeze(), target.squeeze()
-        loss = torch.sum(mse_loss(output, target), dim=1)
+        loss = torch.sum(mse_loss(output, target), dim=2)
         loss = torch.mean(loss)
         return loss
 
-    def latent_reg_loss_func(self, data, output, latent, target):
-        mse_loss = nn.MSELoss(reduction='none')
-        final_dim = data.shape[-1] // 2
-
-        X_2dt = torch.cat([data[:, :, :, final_dim:], target[:, :, :, :final_dim]], dim=3)
-        output_dt, latent_dt = output, latent                 # (batch, 64, 1, 1)
-        output_2dt, latent_2dt = self.train_forward(X_2dt)    # (batch, 64, 1, 1)
-        output_3dt, latent_3dt = self.train_forward(target)   # (batch, 64, 1, 1)
-
-        combined_latent = torch.cat([latent_dt, latent_2dt, latent_3dt])    # (3*batch, 64, 1, 1)
-        dim_means = torch.mean(combined_latent, dim=0, keepdim=True)        # (1, 64, 1, 1)
-        dim_stds = torch.std(combined_latent, dim=0, keepdim=True) + 1e-7   # (1, 64, 1, 1)
-
-        scaled_latent_dt = torch.div(torch.sub(latent_dt, dim_means), dim_stds)
-        scaled_latent_2dt = torch.div(torch.sub(latent_2dt, dim_means), dim_stds)
-        scaled_latent_3dt = torch.div(torch.sub(latent_3dt, dim_means), dim_stds)
-
-        deriv_1_dt = scaled_latent_2dt - scaled_latent_dt     # (batch, 64, 1, 1)
-        deriv_1_2dt = scaled_latent_3dt - scaled_latent_2dt   # (batch, 64, 1, 1)
-        deriv_2_dt = deriv_1_2dt - deriv_1_dt                 # (batch, 64, 1, 1)
-
-        deriv_1_dt_loss = torch.mean(torch.sum(torch.square(deriv_1_dt), dim=1))
-        deriv_1_2dt_loss = torch.mean(torch.sum(torch.square(deriv_1_2dt), dim=1))
-        deriv_2_dt_loss = torch.mean(torch.sum(torch.square(deriv_2_dt), dim=1))
-
-        reg_loss = deriv_1_dt_loss + deriv_1_2dt_loss + deriv_2_dt_loss
-        return reg_loss
-    
-    def refine_reg_loss_func(self, data, output, latent):
-        def _sum_encoder(data):
-            assert data.requires_grad
-            output, latent = self.train_forward(data)   # data: (batch, 64)   latent: (batch, dim)
-            _sum_latent = latent.sum(dim=0)   # _sum_latent: (dim)
-            assert _sum_latent.requires_grad
-            return _sum_latent
-        
-        with torch.enable_grad():
-            data.requires_grad_()
-            J = jacobian(_sum_encoder, data, create_graph=True)   # J: (dim, batch, 64)
-        maxs, _ = torch.max(latent, dim=0)
-        mins, _ = torch.min(latent, dim=0)
-        scale_factor = torch.sub(maxs, mins) / 2
-        dim_stds = torch.unsqueeze(torch.unsqueeze(torch.std(latent, dim=0), 1), 1) + 1e-7
-        scale_factor = torch.unsqueeze(torch.unsqueeze(scale_factor, 1), 1)
-        scaled_J = torch.div(J, scale_factor)
-        scaled_J = torch.div(J, dim_stds)
-        scaled_J = scaled_J.permute(1,0,2)   # scaled_J: (batch, dim, 64)
-        F_norm = torch.linalg.norm(scaled_J, dim=[1,2])
-        # F_norm = torch.linalg.norm(J, dim=[1,2])
-        reg_loss = torch.mean(torch.square(F_norm))
+    def latent_reg_loss_func(self, latent):
+        # means = torch.mean(latent, dim=1, keepdim=True)
+        # stds = torch.std(latent, dim=1, keepdim=True)
+        # scaled_latent = (latent - means) / (stds + 1e-7)
+        scaled_latent = latent
+        deriv_1 = scaled_latent[:, 1:] - scaled_latent[:, :-1]
+        deriv_2 = deriv_1[:, 1:] - deriv_1[:, :-1]
+        deriv_3 = deriv_2[:, 1:] - deriv_2[:, :-1]
+        deriv_4 = deriv_3[:, 1:] - deriv_3[:, :-1]
+        deriv_1_loss = torch.mean(torch.sum(torch.square(deriv_1), dim=2))
+        deriv_2_loss = torch.mean(torch.sum(torch.square(deriv_2), dim=2))
+        deriv_3_loss = torch.mean(torch.sum(torch.square(deriv_3), dim=2))
+        deriv_4_loss = torch.mean(torch.sum(torch.square(deriv_4), dim=2))
+        reg_loss = deriv_1_loss + deriv_2_loss + deriv_3_loss + deriv_4_loss
         return reg_loss
 
-    def train_forward(self, x):
+    def refine_reg_loss_func(self, latent):
+        means = torch.mean(latent, dim=(0,1), keepdim=True)
+        stds = torch.std(latent, dim=(0,1), keepdim=True)
+        scaled_latent = (latent - means) / (stds + 1e-7)
+        # scaled_latent = latent
+        deriv_1 = scaled_latent[:, 1:] - scaled_latent[:, :-1]
+        deriv_2 = deriv_1[:, 1:] - deriv_1[:, :-1]
+        deriv_3 = deriv_2[:, 1:] - deriv_2[:, :-1]
+        deriv_4 = deriv_3[:, 1:] - deriv_3[:, :-1]
+        deriv_1_loss = torch.mean(torch.sum(torch.square(deriv_1), dim=2))
+        deriv_2_loss = torch.mean(torch.sum(torch.square(deriv_2), dim=2))
+        deriv_3_loss = torch.mean(torch.sum(torch.square(deriv_3), dim=2))
+        deriv_4_loss = torch.mean(torch.sum(torch.square(deriv_4), dim=2))
+        reg_loss = deriv_1_loss + deriv_2_loss + deriv_3_loss + deriv_4_loss
+        return reg_loss
+
+    def train_forward(self, x, noisy=False):
         if self.hparams.model_name == 'encoder-decoder' or 'refine' in self.hparams.model_name:
             output, latent = self.model(x)
         if self.hparams.model_name == 'encoder-decoder-64':
-            output, latent = self.model(x, x, False)
+            output, latent = self.model(x, x, False, noisy)
         return output, latent
 
     def training_step(self, batch, batch_idx):
         data, target, filepath = batch
-        output, latent = self.train_forward(data)
-            
-        # Recon + Smoothing loss
+        filepath = np.transpose(filepath)
+
+        batch_size, frames = data.shape[0], data.shape[1]
+        flatten_data = data.flatten(0,1)
+        flatten_output, flatten_latent = self.train_forward(flatten_data, noisy=True)
+        output = torch.reshape(flatten_output, target.shape)
+        latent_dims = flatten_latent.shape[1]
+        latent = torch.reshape(flatten_latent, (batch_size, frames, latent_dims))
+        
         train_loss, train_recon_loss, train_reg_loss = self.loss_func(data, output, latent, target, training=True, all_losses=True)
         self.log('train_loss', train_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log('train_rec_loss', train_recon_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log('train_reg_loss', train_reg_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-
         return train_loss
 
     def validation_step(self, batch, batch_idx):
         data, target, filepath = batch
-        output, latent = self.train_forward(data)
+        filepath = np.transpose(filepath)
+
+        batch_size, frames = data.shape[0], data.shape[1]
+        flatten_data = data.flatten(0,1)
+        flatten_output, flatten_latent = self.train_forward(flatten_data, noisy=True)
+        output = torch.reshape(flatten_output, target.shape)
+        latent_dims = flatten_latent.shape[1]
+        latent = torch.reshape(flatten_latent, (batch_size, frames, latent_dims))
 
         val_loss, val_recon_loss, val_reg_loss = self.loss_func(data, output, latent, target, all_losses=True)
-        self.log('val_loss', val_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('val_rec_loss', val_recon_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('val_reg_loss', val_reg_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val_loss', val_loss, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val_rec_loss', val_recon_loss, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val_reg_loss', val_reg_loss, on_epoch=True, prog_bar=True, logger=True)
         return val_loss
 
     def test_step(self, batch, batch_idx):
         
         if self.hparams.model_name == 'encoder-decoder' or self.hparams.model_name == 'encoder-decoder-64':
             data, target, filepath = batch
+            filepath = np.transpose(filepath)
+            batch_size, frames = data.shape[0], data.shape[1]
+            flatten_data = data.flatten(0,1)
+            flatten_target = target.flatten(0,1)
+            flatten_filepath = filepath.flatten()
             if self.hparams.model_name == 'encoder-decoder':
                 output, latent = self.model(data)
             if self.hparams.model_name == 'encoder-decoder-64':
-                output, latent = self.model(data, data, False)
-            test_loss = self.loss_func(data, output, latent, target)
-            self.log('test_loss', test_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-            # save the output images and latent vectors
-            self.all_filepaths.extend(filepath)
-            for idx in range(data.shape[0]):
-                comparison = torch.cat([data[idx,:, :, :128].unsqueeze(0),
-                                        data[idx,:, :, 128:].unsqueeze(0),
-                                        target[idx, :, :, :128].unsqueeze(0),
-                                        target[idx, :, :, 128:].unsqueeze(0),
-                                        output[idx, :, :, :128].unsqueeze(0),
-                                        output[idx, :, :, 128:].unsqueeze(0)])
-                save_image(comparison.cpu(), os.path.join(self.pred_log_dir, filepath[idx]), nrow=1)
-                latent_tmp = latent[idx].view(1, -1)[0]
+                flatten_output, flatten_latent = self.model(flatten_data, flatten_data, False)
+            output = torch.reshape(flatten_output, target.shape)
+            latent_dims = flatten_latent.shape[1]
+            latent = torch.reshape(flatten_latent, (batch_size, frames, latent_dims))
+            test_loss, test_recon_loss, test_reg_loss = self.loss_func(data, output, latent, target, all_losses=True)
+            self.log('test_loss', test_loss, on_epoch=True, prog_bar=True, logger=True)
+            self.log('test_recon_loss', test_recon_loss, on_epoch=True, prog_bar=True, logger=True)
+            self.log('test_reg_loss', test_reg_loss, on_epoch=True, prog_bar=True, logger=True)
+            self.all_filepaths.extend(flatten_filepath)
+
+            for idx in range(flatten_data.shape[0]):
+                comparison = torch.cat([flatten_data[idx,:, :, :128].unsqueeze(0),
+                                        flatten_data[idx,:, :, 128:].unsqueeze(0),
+                                        flatten_target[idx, :, :, :128].unsqueeze(0),
+                                        flatten_target[idx, :, :, 128:].unsqueeze(0),
+                                        flatten_output[idx, :, :, :128].unsqueeze(0),
+                                        flatten_output[idx, :, :, 128:].unsqueeze(0)])
+                save_image(comparison.cpu(), os.path.join(self.pred_log_dir, flatten_filepath[idx]), nrow=1)
+                latent_tmp = flatten_latent[idx].view(1, -1)[0]
                 latent_tmp = latent_tmp.cpu().detach().numpy()
                 self.all_latents.append(latent_tmp)
 
         if 'refine' in self.hparams.model_name:
             data, target, filepath = batch
-            _, latent = self.high_dim_model(data, data, False)
-            latent = latent.squeeze(-1).squeeze(-1)
-            latent_reconstructed, latent_latent = self.model(latent)
-            output, _ = self.high_dim_model(data, latent_reconstructed.unsqueeze(2).unsqueeze(3), True)
-            # calculate losses
+            filepath = np.transpose(filepath)
+            batch_size, frames = data.shape[0], data.shape[1]
+            flatten_data = data.flatten(0,1)
+            flatten_target = target.flatten(0,1)
+            flatten_filepath = filepath.flatten()
+            _, flatten_latent = self.high_dim_model(flatten_data, flatten_data, False)
+            flatten_latent = flatten_latent.squeeze(-1).squeeze(-1)
+            flatten_latent_reconstructed, flatten_latent_latent = self.model(flatten_latent)
+
+            flatten_output, _ = self.high_dim_model(flatten_data, flatten_latent_reconstructed.unsqueeze(2).unsqueeze(3), True)
+            output = torch.reshape(flatten_output, target.shape)
             pixel_reconstruction_loss = self.recon_loss_func(output, target)
-            self.log('pixel_reconstruction_loss', pixel_reconstruction_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-            # save the output images and latent vectors
-            self.all_filepaths.extend(filepath)
-            for idx in range(data.shape[0]):
-                comparison = torch.cat([data[idx, :, :, :128].unsqueeze(0),
-                                        data[idx, :, :, 128:].unsqueeze(0),
-                                        target[idx, :, :, :128].unsqueeze(0),
-                                        target[idx, :, :, 128:].unsqueeze(0),
-                                        output[idx, :, :, :128].unsqueeze(0),
-                                        output[idx, :, :, 128:].unsqueeze(0)])
-                save_image(comparison.cpu(), os.path.join(self.pred_log_dir, filepath[idx]), nrow=1)
-                latent_tmp = latent[idx].view(1, -1)[0]
+            self.log('pixel_reconstruction_loss', pixel_reconstruction_loss, on_epoch=True, prog_bar=True, logger=True)
+            self.all_filepaths.extend(flatten_filepath)
+
+            for idx in range(flatten_data.shape[0]):
+                comparison = torch.cat([flatten_data[idx,:, :, :128].unsqueeze(0),
+                                        flatten_data[idx,:, :, 128:].unsqueeze(0),
+                                        flatten_target[idx, :, :, :128].unsqueeze(0),
+                                        flatten_target[idx, :, :, 128:].unsqueeze(0),
+                                        flatten_output[idx, :, :, :128].unsqueeze(0),
+                                        flatten_output[idx, :, :, 128:].unsqueeze(0)])
+                save_image(comparison.cpu(), os.path.join(self.pred_log_dir, flatten_filepath[idx]), nrow=1)
+                latent_tmp = flatten_latent[idx].view(1, -1)[0]
                 latent_tmp = latent_tmp.cpu().detach().numpy()
                 self.all_latents.append(latent_tmp)
                 # save latent_latent: the latent vector in the refine network
-                latent_latent_tmp = latent_latent[idx].view(1, -1)[0]
+                latent_latent_tmp = flatten_latent_latent[idx].view(1, -1)[0]
                 latent_latent_tmp = latent_latent_tmp.cpu().detach().numpy()
                 self.all_refine_latents.append(latent_latent_tmp)
                 # save latent_reconstructed: the latent vector reconstructed by the entire refine network
-                latent_reconstructed_tmp = latent_reconstructed[idx].view(1, -1)[0]
+                latent_reconstructed_tmp = flatten_latent_reconstructed[idx].view(1, -1)[0]
                 latent_reconstructed_tmp = latent_reconstructed_tmp.cpu().detach().numpy()
                 self.all_reconstructed_latents.append(latent_reconstructed_tmp)
-
 
     def test_save(self):
         if self.hparams.model_name == 'encoder-decoder' or self.hparams.model_name == 'encoder-decoder-64':
@@ -309,8 +313,8 @@ class VisDynamicsModel(pl.LightningModule):
                 # convert the file strings into tuple so that we can use TensorDataset to load everything together
                 train_filepaths = torch.Tensor(self.paths_to_tuple(train_filepaths))
                 val_filepaths = torch.Tensor(self.paths_to_tuple(val_filepaths))
-                self.train_dataset = torch.utils.data.TensorDataset(train_data, train_target, train_filepaths)
-                self.val_dataset = torch.utils.data.TensorDataset(val_data, val_target, val_filepaths)
+                self.train_dataset = NeuralPhysRefineDataset(train_data, train_target, train_filepaths)
+                self.val_dataset = NeuralPhysRefineDataset(val_data, val_target, val_filepaths)
             else:
                 self.train_dataset = NeuralPhysDataset(data_filepath=self.hparams.data_filepath,
                                                        flag='train',
@@ -334,6 +338,23 @@ class VisDynamicsModel(pl.LightningModule):
             self.all_reconstructed_latents = []
 
     def train_dataloader(self):
+        if 'refine' not in self.hparams.model_name:
+            self.train_dataset = NeuralPhysDataset(data_filepath=self.hparams.data_filepath,
+                                                   flag='train',
+                                                   seed=self.hparams.seed,
+                                                   object_name=self.hparams.dataset)
+        else:
+            high_dim_var_log_dir = self.var_log_dir.replace('refine', 'encoder-decoder')
+            train_data = torch.FloatTensor(np.load(os.path.join(high_dim_var_log_dir+'_train', 'latent.npy')))
+            train_target = torch.FloatTensor(np.load(os.path.join(high_dim_var_log_dir+'_train', 'latent.npy')))
+            val_data = torch.FloatTensor(np.load(os.path.join(high_dim_var_log_dir+'_val', 'latent.npy')))
+            val_target = torch.FloatTensor(np.load(os.path.join(high_dim_var_log_dir+'_val', 'latent.npy')))
+            train_filepaths = list(np.load(os.path.join(high_dim_var_log_dir+'_train', 'ids.npy')))
+            val_filepaths = list(np.load(os.path.join(high_dim_var_log_dir+'_val', 'ids.npy')))
+            # convert the file strings into tuple so that we can use TensorDataset to load everything together
+            train_filepaths = torch.Tensor(self.paths_to_tuple(train_filepaths))
+            val_filepaths = torch.Tensor(self.paths_to_tuple(val_filepaths))
+            self.train_dataset = NeuralPhysRefineDataset(train_data, train_target, train_filepaths)
         train_loader = torch.utils.data.DataLoader(dataset=self.train_dataset,
                                                    batch_size=self.hparams.train_batch,
                                                    shuffle=True,
@@ -353,3 +374,10 @@ class VisDynamicsModel(pl.LightningModule):
                                                   shuffle=False,
                                                   **self.kwargs)
         return test_loader
+
+# How to clean code
+# Write scheduler for recon/reg step
+# Give boolean video batch for dataloader when reloading
+# Add num frames to config file
+# Give num frames for dataloader
+# Shuffle video batches in dataloader

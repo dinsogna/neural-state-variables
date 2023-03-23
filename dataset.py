@@ -1,4 +1,4 @@
-
+import time
 import os
 import sys
 import json
@@ -8,7 +8,7 @@ import itertools
 import numpy as np
 from PIL import Image
 from scipy import misc
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, TensorDataset
 from torchvision import datasets, transforms
 
 class NeuralPhysDataset(Dataset):
@@ -18,6 +18,7 @@ class NeuralPhysDataset(Dataset):
         self.object_name = object_name
         self.data_filepath = data_filepath
         self.all_filelist = self.get_all_filelist()
+        self.video_batch = True
 
     def get_all_filelist(self):
         filelist = []
@@ -40,10 +41,30 @@ class NeuralPhysDataset(Dataset):
         return filelist
 
     def __len__(self):
+        if self.video_batch:
+            return len(self.all_filelist) // 57
         return len(self.all_filelist)
 
     # 0, 1 -> 2, 3
     def __getitem__(self, idx):
+        if self.video_batch:
+            file_list = self.all_filelist[57 * idx : 57 * (idx+1)]
+            data, target, filepath = [], [], []
+            for par_list in file_list:
+                tmp_data, tmp_target = [], []
+                for i in range(2):
+                    tmp_data.append(self.get_data(par_list[i])) # 0, 1
+                tmp_data = torch.cat(tmp_data, 2)
+                data.append(tmp_data)
+                tmp_target.append(self.get_data(par_list[-2])) # 2
+                tmp_target.append(self.get_data(par_list[-1])) # 3
+                tmp_target = torch.cat(tmp_target, 2)
+                target.append(tmp_target)
+                filepath.append('_'.join(par_list[0].split('/')[-2:]))
+            data = torch.stack(data)
+            target = torch.stack(target)
+            return data, target, filepath
+
         par_list = self.all_filelist[idx]
         data = []
         for i in range(2):
@@ -64,6 +85,37 @@ class NeuralPhysDataset(Dataset):
         data = data.permute(2, 0, 1).float()
         return data
 
+    def set_video_batch(video_batch_bool):
+        self.video_batch = video_batch_bool
+
+class NeuralPhysRefineDataset(TensorDataset):
+    def __init__(self, data, target, filepaths):
+        self.data = data
+        self.target = target
+        self.filepaths = filepaths
+        self.video_batch = True
+
+    def __len__(self):
+        if self.video_batch:
+            return len(self.filepaths) // 57
+        return len(self.filepaths)
+
+    # 0, 1 -> 2, 3
+    def __getitem__(self, idx):
+        if self.video_batch:
+            data = self.data[57 * idx : 57 * (idx + 1)]
+            target = self.target[57 * idx : 57 * (idx + 1)]
+            filepath = [f'{int(f[0])}_{int(f[1])}.png' for f in self.filepaths[57 * idx : 57 * (idx + 1)]]
+            # filepath = np.array(filepath, dtype=int)
+            return data, target, filepath
+
+        data = self.data[idx]
+        target = self.target[idx]
+        filepath = '_'.join(self.filepaths[idx])
+        return data, target, filepath
+
+    def set_video_batch(video_batch_bool):
+        self.video_batch = video_batch_bool
 
 
 class NeuralPhysLatentDynamicsDataset(Dataset):
